@@ -16,7 +16,6 @@ env:
   WIT_VERSION: v3.05a-r8638
 
 jobs:
-jobs:
   build:
     strategy:
       fail-fast: false
