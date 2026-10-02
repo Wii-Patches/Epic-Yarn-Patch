@@ -2,7 +2,7 @@
 import os
 from PyInstaller.utils.hooks import collect_all
 
-ICON = os.path.join(SPECPATH, 'assets', 'icon.icns' if os.uname().sysname == 'Darwin' else 'icon.ico')
+ICON = os.path.join(SPECPATH, 'assets', 'icon.icns' if __import__('sys').platform == 'darwin' else 'icon.ico')
 
 # tkinterdnd2 ships per-platform tkdnd Tcl binaries that must come along, or
 # the frozen app silently loses drag-and-drop and falls back to click-to-browse.
