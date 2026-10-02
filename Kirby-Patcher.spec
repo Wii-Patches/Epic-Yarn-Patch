@@ -11,6 +11,9 @@ dnd_datas, dnd_binaries, dnd_hidden = collect_all('tkinterdnd2')
 # wit is bundled when it is on PATH at build time (or WIT=/path/to/wit)
 wit = os.environ.get('WIT') or __import__('shutil').which('wit')
 wit_bins = [(wit, '.')] if wit else []
+if wit and wit.lower().endswith('.exe'):        # the Cygwin build needs its runtime DLLs next to it
+    wd = os.path.dirname(wit)
+    wit_bins += [(os.path.join(wd, f), '.') for f in os.listdir(wd) if f.lower().endswith('.dll')]
 
 a = Analysis(
     ['gui.py'],
@@ -41,7 +44,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
+    target_arch=os.environ.get('TARGET_ARCH') or None,
     codesign_identity=None,
     entitlements_file=None,
     icon=ICON,

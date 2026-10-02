@@ -1,5 +1,7 @@
 # Epic-Yarn-Patch
 
+<p align="center"><img src="assets/icon.png" width="160" alt="Kirby's Epic Yarn"></p>
+
 A patcher for *Kirby's Epic Yarn* (Wii) that adds **GameCube controller support**: play with a GameCube pad
 in ports 1-4, no Wii Remote needed.
 
