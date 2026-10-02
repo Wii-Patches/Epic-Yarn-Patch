@@ -19,12 +19,13 @@ Works with the USA, Europe, Japan and Korea discs.
 
 1. **Download** `Kirby-Patcher` for your platform from Releases (or run `python3 gui.py`).
    The apps are unsigned, so your OS will warn you. On macOS, right-click the app and choose Open.
-2. **Drop your `.wbfs` or `.iso` on the window.**
+2. **Pick a layout** (B/A or Y/B, see Controls), then **drop your `.wbfs` or `.iso` on the window.**
 3. **Wait for "done: patched in place".** It takes a few minutes: the patcher reads the disc's own ID, patches
    the matching `main.dol` and rebuilds the image. Your original is kept as `<name>.bak`.
 4. **Copy the image back** to your USB drive or SD card and play.
 
 No window? `python3 patcher.py "Kirby's Epic Yarn (USA).wbfs"` does the same, and
+`python3 patcher.py --layout yb <image>` for the Y/B layout, and
 `python3 patcher.py --check <image>` says which region a disc is and whether it is already patched.
 
 It needs about twice the image's size free in the image's folder while it works. The patcher refuses a disc it
@@ -33,7 +34,8 @@ doesn't recognize or that was already patched, rather than guess.
 ## Controls
 
 The pad takes the place of a Classic Controller, and the Classic Controller code (below) turns that into what the
-game expects from the Wii Remote, using its B/A layout:
+game expects from the Wii Remote. Two layouts are offered (Vague Rant and crediar's B/A and Y/B modes); the GameCube
+mapping is chosen so **A jumps and B whips in both**. The table is the B/A layout:
 
 | GameCube | Classic Controller | Wii Remote | In the game |
 | --- | --- | --- | --- |
@@ -48,6 +50,9 @@ game expects from the Wii Remote, using its B/A layout:
 | Start | + | + | Pause |
 | Z | − | − | The controls screen for the current form |
 | C-stick | Right stick | Tilt, pointer | Aim the Tankbot and the Fire Engine, point |
+
+In the Y/B layout the Classic Controller's B jumps and Y whips, so the pad's A and B are sent there and X and Y
+become its A and X (the remote's A and B). On the pad itself nothing changes for jumping and whipping.
 
 Left and right on the C-stick tilt the remote. There is no HOME button on a GameCube pad, so the HOME Menu still
 needs a Wii Remote. A Wii Remote that *is* connected keeps working alongside the pad.
@@ -73,6 +78,10 @@ needs a Wii Remote. A Wii Remote that *is* connected keeps working alongside the
 - **The patcher** (`patcher.py`) on a copy of the USA `.wbfs`: it patches and rebuilds the image, refuses to patch it
   twice, and Dolphin's emulated GameCube pad is detected on the result through the real Serial Interface path.
   The other regions' discs were not run through the patcher itself, only checked by `tools/verify.py`.
+
+- **Y/B layout**, USA, same hand-fed Dolphin build: the pad's A and B reach the game as the remote's 2 and 1, X and Y
+  as A and B, L/R, Start and Z as in B/A. Its code differs from B/A in four constants, checked against the published Y/B
+  code. It was not played through, and the other regions' Y/B builds were only checked by `tools/verify.py`.
 
 Not tested: a real console, aiming the Tankbot and the Fire Engine, and the pointer in Kirby's Pad.
 

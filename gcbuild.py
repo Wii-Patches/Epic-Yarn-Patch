@@ -37,7 +37,7 @@ def dol_dir():
     return os.environ.get('KEY_DOLS', 'dols')       # a directory of <REGION>.dol
 
 
-def compile_region(a, debug_feed):
+def compile_region(a, debug_feed, yb=False):
     src = os.path.join(HERE, 'src')
     tmp = tempfile.mkdtemp(prefix='gcpad')
     D = {
@@ -49,6 +49,8 @@ def compile_region(a, debug_feed):
     defs = ['-D%s=0x%08Xu' % kv for kv in D.items()] + ['-DHOOK_' + h[2] for h in HOOKS]
     if debug_feed:
         defs.append('-DDEBUG_FEED')
+    if yb:
+        defs.append('-DLAYOUT_YB')
     cflags = ['-O2', '-fno-unroll-loops', '-mbig-endian', '-msoft-float', '-msdata=none', '-ffreestanding',
               '-fno-pic', '-fno-asynchronous-unwind-tables', '-fno-stack-protector', '-nostdlib', '-Wall',
               '-mno-sdata', '-fno-builtin']
@@ -83,7 +85,26 @@ def parse_vr(path):
     return out
 
 
-def relocate_vr(rev, kpadiread, dol):
+# Y/B mode differs from B/A mode only in four constants of the button injector (the last code): which remote button
+# each of A, B, X, Y presses.  CC button mask -> (B/A word, Y/B word)
+YB_SWAP = {0x70E50010: (0x60C60100, 0x60C60800), 0x70E50040: (0x60C60200, 0x60C60100),
+           0x70E50008: (0x60C60800, 0x60C60400), 0x70E50020: (0x60C60400, 0x60C60200)}
+
+
+def to_yb(words):
+    """B/A -> Y/B: the `andi.` of each face button is followed by `beq +8; ori r6,r6,<remote button>`"""
+    words, n = list(words), 0
+    for j in range(len(words) - 2):
+        if words[j] in YB_SWAP and words[j + 1] == 0x41820008:
+            ba, yb = YB_SWAP[words[j]]
+            assert words[j + 2] == ba, hex(words[j + 2])
+            words[j + 2] = yb
+            n += 1
+    assert n == 4, n
+    return words
+
+
+def relocate_vr(rev, kpadiread, dol, yb=False):
     delta = kpadiread - VR_USA_KPADIREAD
     extras = []
     for site, words in parse_vr(os.path.join(HERE, 'vr', 'RK5E01.txt')):
@@ -94,6 +115,8 @@ def relocate_vr(rev, kpadiread, dol):
                 tgt = VR_ASPECT + delta
                 words[j] = 0x3CC00000 | (tgt >> 16)
                 words[j + 1] = 0x60C60000 | (tgt & 0xFFFF)
+        if yb and site == VR_SITES['RK5E01'][3]:
+            words = to_yb(words)
         site += delta
         orig = struct.unpack('>I', dol.read(site, 4))[0]
         assert words[-1] == 0 and orig in words, 'VR code does not contain the instruction at %08X' % site   # it runs it itself
@@ -102,15 +125,15 @@ def relocate_vr(rev, kpadiread, dol):
     return extras
 
 
-def build_region(rev, ref, dol, debug_feed):
+def build_region(rev, ref, dol, debug_feed, yb=False):
     a = anchors.resolve(ref, dol)
-    blob, syms = compile_region(a, debug_feed)
+    blob, syms = compile_region(a, debug_feed, yb)
     sites = []
     for name, key, _ in HOOKS:
         site = a[key]
         orig = struct.unpack('>I', dol.read(site, 4))[0]
         sites.append({'site': site, 'hook': syms['hook_' + name], 'orig': orig, 'name': name})
-    extras = relocate_vr(rev, a['KPADiRead'], dol)
+    extras = relocate_vr(rev, a['KPADiRead'], dol, yb)
     size = len(blob) + sum(4 * (len(e['words']) + 1) for e in extras)
     return {'base': BASE, 'blob': blob.hex(), 'state': syms['gc_state'], 'sites': sites, 'extras': extras,
             'addrs': a}, size
@@ -122,10 +145,12 @@ def main():
     out = {}
     for rev in REGIONS:
         dol = Dol(os.path.join(dol_dir(), rev + '.dol'))
-        out[rev], n = build_region(rev, ref, dol, debug_feed)
-        print(rev, '%d bytes' % n, {s['name']: '%08X' % s['site'] for s in out[rev]['sites']},
-              'state %08X' % out[rev]['state'])
-        assert BASE + n <= 0x80003000, 'blob does not fit below the OS globals'
+        for yb in (False, True):
+            key = rev + '-YB' if yb else rev
+            out[key], n = build_region(rev, ref, dol, debug_feed, yb)
+            print(key, '%d bytes' % n, {s['name']: '%08X' % s['site'] for s in out[key]['sites']},
+                  'state %08X' % out[key]['state'])
+            assert BASE + n <= 0x80003000, 'blob does not fit below the OS globals'
     name = 'patches_feed.json' if debug_feed else 'patches.json'
     json.dump(out, open(os.path.join(HERE, name), 'w'), indent=1)
 

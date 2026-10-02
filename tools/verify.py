@@ -14,7 +14,7 @@ import patch_dol
 
 ok = True
 for rev, patch in json.load(open(os.path.join(HERE, '..', 'patches.json'))).items():
-    path = os.path.join(os.environ.get('KEY_DOLS', 'dols'), rev + '.dol')
+    path = os.path.join(os.environ.get('KEY_DOLS', 'dols'), rev.split('-')[0] + '.dol')
     data = open(path, 'rb').read()
     errs = []
     if patch_dol.state(data, patch) != 'unpatched':

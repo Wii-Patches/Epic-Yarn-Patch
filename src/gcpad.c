@@ -188,16 +188,31 @@ static inline s16 stick(u32 raw)
     return (s16)v;
 }
 
-/* The layout follows the Classic Controller mapping of the B/A code: A jumps (the remote's 2), B whips
- * (the remote's 1), X is the remote's A and Y its B, L and R repeat jump and whip, Z is -, Start is +. */
+/* The layout follows the Classic Controller mapping of the code the pad is paired with.
+ *   B/A mode: A -> the remote's 2 (jump), B -> 1 (whip), X -> A, Y -> B
+ *   Y/B mode: B -> 2, Y -> 1, A -> A, X -> B
+ * so on the pad A always jumps and B always whips; X and Y are the remote's A and B.  L and R repeat jump and
+ * whip, Z is -, Start is +. */
+#ifdef LAYOUT_YB
+#define CC_JUMP CL_B
+#define CC_WHIP CL_Y
+#define CC_WA   CL_A
+#define CC_WB   CL_X
+#else
+#define CC_JUMP CL_A
+#define CC_WHIP CL_B
+#define CC_WA   CL_X
+#define CC_WB   CL_Y
+#endif
+
 static __attribute__((noinline)) u32 cc_buttons(u32 h)
 {
     u32 b = 0;
 
-    if (h & GC_A) b |= CL_A;
-    if (h & GC_B) b |= CL_B;
-    if (h & GC_X) b |= CL_X;
-    if (h & GC_Y) b |= CL_Y;
+    if (h & GC_A) b |= CC_JUMP;
+    if (h & GC_B) b |= CC_WHIP;
+    if (h & GC_X) b |= CC_WA;
+    if (h & GC_Y) b |= CC_WB;
     if (h & GC_START) b |= CL_PLUS;
     if (h & GC_Z) b |= CL_MINUS;
     if (h & GC_L) b |= CL_L;

@@ -27,7 +27,7 @@ class App(BASE):
     def __init__(self):
         super().__init__()
         self.title('Kirby-Patcher')
-        self.geometry('600x440')
+        self.geometry('600x500')
         self.msgq = queue.Queue()
         self.busy = False
         try:
@@ -45,6 +45,14 @@ class App(BASE):
         if HAVE_DND:
             self.drop.drop_target_register(DND_FILES)
             self.drop.dnd_bind('<<Drop>>', self.on_drop)
+
+        opts = tk.LabelFrame(self, text='Layout (the Classic Controller code\'s button mode)')
+        opts.pack(fill='x', padx=10)
+        self.layout = tk.StringVar(value='ba')
+        tk.Radiobutton(opts, text='B/A: A jumps, B whips, X / Y are the remote\'s A / B', value='ba',
+                       variable=self.layout).pack(anchor='w')
+        tk.Radiobutton(opts, text='Y/B: same pad feel, Y/B mode underneath', value='yb',
+                       variable=self.layout).pack(anchor='w')
 
         tk.Label(self, text='USA, Europe, Japan and Korea discs. The original is kept alongside as <name>.bak',
                  fg='#666').pack()
@@ -90,9 +98,9 @@ class App(BASE):
             pass
         self.after(100, self.poll_queue)
 
-    def work(self, image):
+    def work(self, image, layout):
         try:
-            patcher.run_patch(image, lambda t: self.msgq.put(('log', t)))
+            patcher.run_patch(image, lambda t: self.msgq.put(('log', t)), layout)
             self.msgq.put(('done', (True, image)))
         except Exception as e:
             self.msgq.put(('log', 'ERROR: %s' % e))
@@ -109,7 +117,7 @@ class App(BASE):
         self.log.configure(state='normal')
         self.log.delete('1.0', 'end')
         self.log.configure(state='disabled')
-        threading.Thread(target=self.work, args=(image,), daemon=True).start()
+        threading.Thread(target=self.work, args=(image, self.layout.get()), daemon=True).start()
 
 
 if __name__ == '__main__':

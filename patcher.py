@@ -2,6 +2,7 @@
 """Add GameCube controller support to a Kirby's Epic Yarn disc image.
 
   patcher.py <disc.wbfs|disc.iso>           patch the image in place (the original is kept as <name>.bak)
+  patcher.py --layout yb <disc>             the Classic Controller code's Y/B layout instead of the default B/A
   patcher.py --check <disc.wbfs|disc.iso>   say which region it is and whether it is patched; change nothing
 
 The image is extracted, its own sys/main.dol is patched for the disc's region (patch_dol.py) and the image is
@@ -28,6 +29,10 @@ REGIONS = {
     'RK5J01': 'Keito no Kirby (Japan)',
     'RK5K01': 'Teolsil Kirby Iyagi (Korea)',
 }
+
+
+LAYOUTS = {'ba': 'B/A (A jumps, B whips, X and Y are the remote\'s A and B)',
+           'yb': 'Y/B (the Classic Controller code\'s Y/B mode; A jumps, B whips on the pad as well)'}
 
 
 def resource(name):
@@ -94,6 +99,10 @@ def identify(image):
     return disc_id
 
 
+def patch_key(disc_id, layout='ba'):
+    return disc_id + ('-YB' if layout == 'yb' else '')
+
+
 def check(image, log=print):
     """'unpatched', 'patched' or 'mismatch' for the disc's main.dol"""
     disc_id = identify(image)
@@ -110,16 +119,17 @@ def check(image, log=print):
         return disc_id, patch_dol.state(open(dol, 'rb').read(), patch)
 
 
-def run_patch(image, log=print):
+def run_patch(image, log=print, layout='ba'):
     """Patch `image` in place.  Returns the path; raises RuntimeError with a message fit for the user."""
     disc_id = identify(image)
     wit = find_wit()
     if wit is None:
         raise RuntimeError('wit (Wiimms ISO Tool) not found: not bundled with this build and not on PATH')
-    patch = load_patches()[disc_id]
+    patch = load_patches()[patch_key(disc_id, layout)]
     fmt = '--iso' if image.lower().endswith('.iso') else '--wbfs'
     folder = os.path.dirname(os.path.abspath(image))
     log('disc: %s -> %s' % (disc_id, REGIONS[disc_id]))
+    log('layout: %s' % LAYOUTS[layout])
 
     # the extracted disc and the rebuilt image both sit next to the original: make sure they fit first
     need = int(os.path.getsize(image) * 2.2) + (1 << 30)
@@ -173,11 +183,14 @@ def main(argv):
         disc_id, st = check(argv[1])
         print('%s  %s  main.dol: %s' % (disc_id, REGIONS[disc_id], st))
         return 0 if st != 'mismatch' else 1
+    layout = 'ba'
+    if len(argv) == 3 and argv[0] == '--layout' and argv[1].lower() in LAYOUTS:
+        layout, argv = argv[1].lower(), argv[2:]
     if len(argv) != 1 or argv[0].startswith('-'):
         print(__doc__)
         return 2
     try:
-        run_patch(argv[0])
+        run_patch(argv[0], layout=layout)
     except RuntimeError as e:
         print('ERROR: %s' % e, file=sys.stderr)
         return 1
