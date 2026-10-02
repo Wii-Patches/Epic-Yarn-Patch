@@ -22,8 +22,15 @@ DEVKIT = os.environ.get('DEVKITPPC', '/opt/devkitpro/devkitPPC')
 CC = DEVKIT + '/bin/powerpc-eabi-'
 BASE = 0x80001820          # a new DOL text section here: below the OS globals at 0x80003000
 REGIONS = {'RK5E01': 'USA', 'RK5P01': 'Europe', 'RK5J01': 'Japan', 'RK5K01': 'Korea'}
-HOOKS = [('poll', 'KPADiRead', 'POLL'), ('sample', 'Sample', 'SAMPLE'),
-         ('probe', 'WPADProbe', 'PROBE'), ('post', 'Post', 'POST')]
+HOOKS = [('poll', 'KPADiRead', 'POLL'), ('sample', 'Sample', 'SAMPLE'), ('probe', 'WPADProbe', 'PROBE')]
+# Vague Rant and crediar's Classic Controller Support (B/A mode) v1.1, written for the USA disc (vr/RK5E01.txt) and
+# moved to the other regions by KPADiRead's offset.  The sites each region's published code uses (checked):
+VR_SITES = {'RK5E01': [0x806F8080, 0x806F9350, 0x806F9D00, 0x806F7CDC],
+            'RK5P01': [0x806F88E0, 0x806F9BB0, 0x806FA560, 0x806F853C],
+            'RK5J01': [0x806F7DE0, 0x806F90B0, 0x806F9A60, 0x806F7A3C],
+            'RK5K01': [0x806F9200, 0x806FA4D0, 0x806FAE80, 0x806F8E5C]}
+VR_USA_KPADIREAD = 0x806FABF0
+VR_ASPECT = 0x806B0A70            # SCGetAspectRatio's neighbour the pointer code calls (lis/ori pair in the code)
 
 
 def dol_dir():
@@ -36,10 +43,9 @@ def compile_region(a, debug_feed):
     D = {
         'SI_TYPES': a['SiTypes'], 'SI_BUSY': a['SiBusy'], 'SI_SHADOW': a['SiShadow'],
         'FN_SIGETTYPE': a['SIGetType'], 'FN_OSDISABLE': a['OSDisableInterrupts'],
-        'FN_OSRESTORE': a['OSRestoreInterrupts'], 'WPAD_TBL': a['WpadTbl'], 'SIDEWAYS': a['Sideways'],
+        'FN_OSRESTORE': a['OSRestoreInterrupts'], 'WPAD_TBL': a['WpadTbl'],
     }
-    rets = {'POLL_RET': a['KPADiRead'] + 4, 'SAMPLE_RET': a['Sample'] + 4,
-            'PROBE_RET': a['WPADProbe'] + 4, 'POST_RET': a['Post'] + 4}
+    rets = {'POLL_RET': a['KPADiRead'] + 4, 'SAMPLE_RET': a['Sample'] + 4, 'PROBE_RET': a['WPADProbe'] + 4}
     defs = ['-D%s=0x%08Xu' % kv for kv in D.items()] + ['-DHOOK_' + h[2] for h in HOOKS]
     if debug_feed:
         defs.append('-DDEBUG_FEED')
@@ -63,6 +69,39 @@ def compile_region(a, debug_feed):
     return blob, syms
 
 
+def parse_vr(path):
+    """the Gecko C2 codes of a text file -> [(site, [words])]"""
+    L = [l.split() for l in open(path).read().splitlines()[1:] if l.strip()]
+    out, i = [], 0
+    while i < len(L):
+        h = L[i]
+        assert h[0].startswith('C2'), h
+        n = int(h[1], 16)
+        words = [int(x, 16) for l in L[i + 1:i + 1 + n] for x in l]
+        out.append((0x80000000 | (int(h[0], 16) & 0x01FFFFFF), words))
+        i += 1 + n
+    return out
+
+
+def relocate_vr(rev, kpadiread, dol):
+    delta = kpadiread - VR_USA_KPADIREAD
+    extras = []
+    for site, words in parse_vr(os.path.join(HERE, 'vr', 'RK5E01.txt')):
+        words = list(words)
+        for j in range(len(words) - 1):                       # the lis/ori pair that loads the helper's address
+            if words[j] >> 16 == 0x3CC0 and words[j + 1] >> 16 == 0x60C6:
+                assert ((words[j] & 0xFFFF) << 16 | (words[j + 1] & 0xFFFF)) == VR_ASPECT
+                tgt = VR_ASPECT + delta
+                words[j] = 0x3CC00000 | (tgt >> 16)
+                words[j + 1] = 0x60C60000 | (tgt & 0xFFFF)
+        site += delta
+        orig = struct.unpack('>I', dol.read(site, 4))[0]
+        assert words[-1] == 0 and orig in words, 'VR code does not contain the instruction at %08X' % site   # it runs it itself
+        extras.append({'site': site, 'orig': orig, 'words': words[:-1]})   # the last word becomes the branch back
+    assert [e['site'] for e in extras] == VR_SITES[rev], (rev, [hex(e['site']) for e in extras])
+    return extras
+
+
 def build_region(rev, ref, dol, debug_feed):
     a = anchors.resolve(ref, dol)
     blob, syms = compile_region(a, debug_feed)
@@ -71,8 +110,10 @@ def build_region(rev, ref, dol, debug_feed):
         site = a[key]
         orig = struct.unpack('>I', dol.read(site, 4))[0]
         sites.append({'site': site, 'hook': syms['hook_' + name], 'orig': orig, 'name': name})
-    return {'base': BASE, 'blob': blob.hex(), 'state': syms['gc_state'], 'sites': sites,
-            'addrs': a}, len(blob)
+    extras = relocate_vr(rev, a['KPADiRead'], dol)
+    size = len(blob) + sum(4 * (len(e['words']) + 1) for e in extras)
+    return {'base': BASE, 'blob': blob.hex(), 'state': syms['gc_state'], 'sites': sites, 'extras': extras,
+            'addrs': a}, size
 
 
 def main():

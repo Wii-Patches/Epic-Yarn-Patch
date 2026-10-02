@@ -1,17 +1,12 @@
-/* GameCube controller -> Wii Remote bridge for Kirby's Epic Yarn.
+/* GameCube controller -> Classic Controller bridge for Kirby's Epic Yarn.
  *
  * The game links the SI library but not PAD, so nothing ever polls the pads:
  * gc_poll() drives the Serial Interface's own auto-polling (the approach is
- * Barrel Blast Patch's, hardware-tested there).  The pad's state is then fed
- * to the game through the Wii Remote library it already uses:
- *
- *   gc_poll    KPADiRead entry          turn the SI poller on for the channel
- *   gc_sample  KPADiRead sample check   queue a bare-Wii-Remote sample with the pad's buttons
- *   gc_probe   WPADProbe entry          report a Wii Remote while a pad is plugged in
- *   gc_post    KPADiRead return         write pointer (C-stick) and tilt into the returned status
- *
- * Epic Yarn is played with the Wii Remote held sideways, and the menus point at
- * the screen, so a bare remote with buttons, a pointer and tilt is all it needs.
+ * Barrel Blast Patch's, hardware-tested there).  gc_sample() turns the pad's
+ * state into a Classic Controller sample in KPAD's ring, and gc_probe() makes
+ * WPADProbe report a connected remote, so KPAD and Vague Rant and crediar's
+ * Classic Controller Support (relocated to every region, see gcbuild.py) treat
+ * the pad as one: the pad's left stick moves and points, its C-stick tilts.
  *
  * Addresses come in as -D macros, resolved per disc region by tools/anchors.py.
  */
@@ -36,9 +31,7 @@ struct chst {
     u8 norep;         /* consecutive frames with NOREP on this port */
     u8 ours;          /* the last sample queued for this channel was ours */
     u8 seen;          /* a pad answered on this frame */
-    u8 shake;         /* parity of the fake shake */
-    u32 prev_btn;     /* the buttons of the previous frame's sample */
-    s32 px, py;       /* pointer, Q16, KPAD units */
+    u8 pad0;
 };
 struct st {
     u32 feed[8];      /* DEBUG_FEED: pad responses (hi, lo) per channel, written by a debugger */
@@ -154,7 +147,7 @@ void gc_poll(u32 c)
 }
 #endif
 
-#if defined(HOOK_SAMPLE) || defined(HOOK_POST)
+#if defined(HOOK_SAMPLE)
 /* GameCube pad bits in the first response word */
 #define GC_A     0x01000000u
 #define GC_B     0x02000000u
@@ -169,52 +162,66 @@ void gc_poll(u32 c)
 #define GC_RIGHT 0x00020000u
 #define GC_LEFT  0x00010000u
 
-/* Wii Remote buttons */
-#define WM_LEFT  0x0001
-#define WM_RIGHT 0x0002
-#define WM_DOWN  0x0004
-#define WM_UP    0x0008
-#define WM_PLUS  0x0010
-#define WM_2     0x0100
-#define WM_1     0x0200
-#define WM_B     0x0400
-#define WM_A     0x0800
-#define WM_MINUS 0x1000
+/* Classic Controller buttons as WPAD reports them */
+#define CL_UP    0x0001
+#define CL_LEFT  0x0002
+#define CL_ZR    0x0004
+#define CL_X     0x0008
+#define CL_A     0x0010
+#define CL_Y     0x0020
+#define CL_B     0x0040
+#define CL_ZL    0x0080
+#define CL_R     0x0200
+#define CL_PLUS  0x0400
+#define CL_MINUS 0x1000
+#define CL_L     0x2000
+#define CL_DOWN  0x4000
+#define CL_RIGHT 0x8000
 
-#define STICK_ON 40       /* control stick: deflection that counts as a D-pad press */
-#endif
-
-#if defined(HOOK_SAMPLE)
-static __attribute__((noinline)) u32 wm_buttons(u32 c, u32 h)
+static inline s16 stick(u32 raw)
 {
-    u32 b = 0, d = 0;
-    s32 x = (s32)((h >> 8) & 0xFF) - 128, y = (s32)(h & 0xFF) - 128;
+    s32 v = ((s32)(raw & 0xFF) - 128) * 3;       /* pad ~+-100 -> game +-300 */
+    if (v > 308)
+        v = 308;
+    if (v < -308)
+        v = -308;
+    return (s16)v;
+}
 
-    /* directions, as the player sees them on the screen */
-    if ((h & GC_LEFT) || x < -STICK_ON) d |= 1;
-    if ((h & GC_RIGHT) || x > STICK_ON) d |= 2;
-    if ((h & GC_DOWN) || y < -STICK_ON) d |= 4;
-    if ((h & GC_UP) || y > STICK_ON) d |= 8;
-    if (*(volatile u8 *)(SIDEWAYS + c)) {
-        /* the game turns a sideways remote's D-pad itself (raw Up is its Left, ...):
-         * hand it the raw bits that come out right */
-        if (d & 1) b |= WM_UP;
-        if (d & 2) b |= WM_DOWN;
-        if (d & 4) b |= WM_LEFT;
-        if (d & 8) b |= WM_RIGHT;
-    } else {
-        if (d & 1) b |= WM_LEFT;
-        if (d & 2) b |= WM_RIGHT;
-        if (d & 4) b |= WM_DOWN;
-        if (d & 8) b |= WM_UP;
-    }
+/* The layout follows the Classic Controller mapping of the B/A code: A jumps (the remote's 2), B whips
+ * (the remote's 1), X is the remote's A and Y its B, L and R repeat jump and whip, Z is -, Start is +. */
+static __attribute__((noinline)) u32 cc_buttons(u32 h)
+{
+    u32 b = 0;
 
-    if (h & (GC_A | GC_X)) b |= WM_2;       /* jump / confirm */
-    if (h & (GC_B | GC_Y)) b |= WM_1;       /* yarn whip / cancel */
-    if (h & GC_R) b |= WM_A;                /* pointer click; summon Angie in co-op */
-    if (h & GC_L) b |= WM_MINUS;            /* controls */
-    if (h & GC_START) b |= WM_PLUS;         /* pause */
+    if (h & GC_A) b |= CL_A;
+    if (h & GC_B) b |= CL_B;
+    if (h & GC_X) b |= CL_X;
+    if (h & GC_Y) b |= CL_Y;
+    if (h & GC_START) b |= CL_PLUS;
+    if (h & GC_Z) b |= CL_MINUS;
+    if (h & GC_L) b |= CL_L;
+    if (h & GC_R) b |= CL_R;
+    if (h & GC_UP) b |= CL_UP;
+    if (h & GC_DOWN) b |= CL_DOWN;
+    if (h & GC_RIGHT) b |= CL_RIGHT;
+    if (h & GC_LEFT) b |= CL_LEFT;
     return b;
+}
+
+/* a Classic Controller's data in a (zeroed) sample */
+static __attribute__((noinline)) void fill_cc(u8 *e, u32 h, u32 l)
+{
+    *(u16 *)(e + 0x2A) = (u16)cc_buttons(h);
+    *(s16 *)(e + 0x2C) = stick(h >> 8);          /* left stick x, y: the control stick */
+    *(s16 *)(e + 0x2E) = stick(h);
+    *(s16 *)(e + 0x30) = stick(l >> 24);         /* right stick x, y: the C-stick */
+    *(s16 *)(e + 0x32) = stick(l >> 16);
+    e[0x34] = (h & GC_L) ? 180 : 0;              /* analog L and R: the game reads them as buttons only */
+    e[0x35] = (h & GC_R) ? 180 : 0;
+    e[0x28] = 2;                                 /* extension: Classic Controller */
+    e[0x29] = 0;                                 /* no extension error */
+    e[0x40] = 8;                                 /* format: classic + accelerometer + pointer */
 }
 
 static inline u8 *ring_entry(u8 *k, u32 idx)
@@ -228,7 +235,7 @@ static inline u8 *ring_entry(u8 *k, u32 idx)
 void gc_sample(u8 *k, u32 c)
 {
     struct chst *s;
-    u32 h, l, b, idx, cnt, size, i;
+    u32 h, l, idx, cnt, size, i;
 
     if (c > 3)
         return;
@@ -239,7 +246,6 @@ void gc_sample(u8 *k, u32 c)
         return;
     }
     s->seen = 1;
-    b = wm_buttons(c, h);
     size = 0x10 + *(u32 *)(k + 0x5A4);
     cnt = k[0x17B];
     idx = k[0x17A];
@@ -255,32 +261,29 @@ void gc_sample(u8 *k, u32 c)
         e = ring_entry(k, idx);
         for (i = 0; i < 0x42; i += 2)
             *(u16 *)(e + i) = 0;
-        *(u16 *)e = (u16)b;
-        e[0x28] = 0;            /* no extension */
-        e[0x29] = 0;            /* no error */
-        e[0x40] = 2;            /* core buttons + accelerometer + pointer */
+        fill_cc(e, h, l);
         k[0x17A] = (u8)(idx + 1);
         k[0x17B] = 1;
         s->ours = 1;
-        s->prev_btn = b;
         return;
     }
 
-    /* a real Wii Remote is delivering samples: the pad's buttons are added to them */
+    /* a real Wii Remote is delivering samples: a bare one gets the pad as its extension, a real Nunchuk or
+     * Classic Controller is never touched */
     s->ours = 0;
     if (cnt > size)
         cnt = size;
     for (i = 0; i < cnt; i++) {
-        u32 j = idx + size - cnt + i;
-        u8 *e = ring_entry(k, j % size);
+        u8 *e = ring_entry(k, (idx + size - cnt + i) % size);
         if (e[0x28] == 0)
-            *(u16 *)e |= (u16)b;
+            fill_cc(e, h, l);
     }
 }
 #endif
 
 #if defined(HOOK_PROBE)
-/* WPADProbe(chan, &type): report a Wii Remote while a pad is plugged in and no remote is */
+/* WPADProbe(chan, &type): report a Classic Controller on the channel while a pad is plugged in, unless the
+ * channel already has a real remote */
 u32 gc_probe(u32 c, u32 *type)
 {
     u32 h, l;
@@ -294,87 +297,7 @@ u32 gc_probe(u32 c, u32 *type)
     if (status != -1 && blk[0x905] != 0xFD)
         return 0;
     if (type)
-        *type = 0;
+        *type = 2;
     return 1;
-}
-#endif
-
-#if defined(HOOK_POST)
-/* 32-bit float with the bits of v / 65536 */
-static __attribute__((noinline)) u32 q16f(s32 v)
-{
-    u32 sign = 0, m, e;
-    if (v == 0)
-        return 0;
-    if (v < 0) {
-        sign = 0x80000000u;
-        v = -v;
-    }
-    m = (u32)v;
-    e = 31 - __builtin_clz(m);                     /* highest set bit */
-    m = (e >= 23) ? (m >> (e - 23)) : (m << (23 - e));
-    return sign | ((e + 127 - 16) << 23) | (m & 0x7FFFFFu);
-}
-
-#define POINTER_MAX   0xF333        /* 0.95 */
-#define POINTER_SPEED 2200          /* Q16 per frame at full deflection: ~0.034, a screen width in ~1 s */
-#define TILT_MAX      0xB000        /* Q16: 0.7 g, about 45 degrees */
-#define SHAKE_G       0x28000       /* Q16: 2.5 g, swung back and forth every frame */
-
-static inline s32 cstick(u32 raw)
-{
-    s32 v = (s32)(raw & 0xFF) - 128;
-    if (v > -12 && v < 12)
-        return 0;
-    return v > 0 ? v - 12 : v + 12;
-}
-
-/* KPADiRead, on its way out: buf = the KPADStatus array it returns, n = how many, c = the channel.
- * The pad has no pointer or accelerometer, so they are written into the status here. */
-void gc_post(u8 *buf, s32 n, u32 c)
-{
-    struct chst *s;
-    u32 h, l, i;
-    s32 sx, sy, ax, ay, az;
-
-    if (c > 3 || n <= 0 || n > 16)
-        return;
-    s = &ST->ch[c];
-    if (!s->ours || !gc_in(c, &h, &l))
-        return;
-
-    sx = cstick(l >> 24);
-    sy = cstick(l >> 16);
-    s->px += sx * POINTER_SPEED / 116;
-    s->py -= sy * POINTER_SPEED / 116;             /* stick up is screen up (KPAD's y grows downward) */
-    if (s->px > POINTER_MAX) s->px = POINTER_MAX;  /* the game clamps to +-0.95 as well */
-    if (s->px < -POINTER_MAX) s->px = -POINTER_MAX;
-    if (s->py > POINTER_MAX) s->py = POINTER_MAX;
-    if (s->py < -POINTER_MAX) s->py = -POINTER_MAX;
-
-    /* tilt: the C-stick leans the remote.  Held sideways, the game reads the angle between the remote's
-     * long axis and the floor (acc.y against acc.z) to aim the Tankbot and the Fire Engine */
-    ax = sx * TILT_MAX / 116;
-    ay = sy * TILT_MAX / 116;
-    az = 0x10000 - (((ax * ax) >> 16) + ((ay * ay) >> 16)) / 2;
-    if (h & GC_Z) {                                 /* shake: the co-op vehicles' boost */
-        s->shake ^= 1;
-        ax = s->shake ? SHAKE_G : -SHAKE_G;
-    }
-
-    for (i = 0; i < (u32)n; i++) {
-        u32 *e = (u32 *)(buf + i * 0xF0);
-        e[0x20 / 4] = q16f(s->px);                  /* pos */
-        e[0x24 / 4] = q16f(s->py);
-        e[0x28 / 4] = 0;                            /* vec */
-        e[0x2C / 4] = 0;
-        e[0x30 / 4] = 0;                            /* speed */
-        ((u8 *)e)[0x5E] = 1;                        /* pointer valid */
-        e[0x0C / 4] = q16f(ax);                     /* acc */
-        e[0x10 / 4] = q16f(ay);
-        e[0x14 / 4] = q16f(az);
-        e[0x18 / 4] = 0x3F800000u;                  /* acc_value: 1 g */
-        e[0x1C / 4] = 0;
-    }
 }
 #endif

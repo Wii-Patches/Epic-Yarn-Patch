@@ -68,15 +68,15 @@ class Dol:
 def state(data, patch):
     """'unpatched' (every hook site holds the original instruction), 'patched', or 'mismatch'"""
     dol = Dol(data)
-    base, end = patch['base'], patch['base'] + len(patch['blob']) // 2
+    base = patch['base']
+    sites = patch['sites'] + patch.get('extras', [])
     try:
-        words = [dol.word(s['site']) for s in patch['sites']]
+        words = [dol.word(s['site']) for s in sites]
     except PatchError:
         return 'mismatch'
-    if all(w == s['orig'] for w, s in zip(words, patch['sites'])):
+    if all(w == s['orig'] for w, s in zip(words, sites)):
         return 'unpatched'
-    if all(w == branch(s['site'], s['hook']) for w, s in zip(words, patch['sites'])) \
-            and any(a == base for a in dol.addr):
+    if all(w >> 26 == 18 and w & 3 == 0 for w in words) and any(a == base for a in dol.addr):
         return 'patched'
     return 'mismatch'
 
@@ -89,13 +89,22 @@ def apply(data, patch):
     if st != 'unpatched':
         raise PatchError('main.dol does not match the expected build of the game '
                          '(an unexpected version, or patched with something else)')
-    blob = bytes.fromhex(patch['blob'])
-    if patch['base'] + len(blob) > LIMIT:
+    blob = bytearray(bytes.fromhex(patch['blob']))
+    base = patch['base']
+    placed = [(s['site'], s['hook']) for s in patch['sites']]
+    for e in patch.get('extras', []):
+        # a Gecko-style C2 body: runs, then branches back to the instruction after its site
+        at = base + len(blob)
+        words = list(e['words']) + [0]
+        words[-1] = branch(at + 4 * (len(words) - 1), e['site'] + 4)
+        blob += struct.pack('>%dI' % len(words), *words)
+        placed.append((e['site'], at))
+    if base + len(blob) > LIMIT:
         raise PatchError('patch does not fit below 0x%08X' % LIMIT)
     dol = Dol(data)
-    dol.add_text(patch['base'], blob)
-    for s in patch['sites']:
-        dol.put(s['site'], branch(s['site'], s['hook']))
+    dol.add_text(base, bytes(blob))
+    for site, at in placed:
+        dol.put(site, branch(site, at))
     return bytes(dol.d)
 
 

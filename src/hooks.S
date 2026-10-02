@@ -46,7 +46,7 @@
     .endm
 
     .section .gctext, "ax"
-    .globl hook_poll, hook_sample, hook_probe, hook_post
+    .globl hook_poll, hook_sample, hook_probe
 
 # KPADiRead(chan, buf, n, err, flag) entry: r3 = channel
 hook_poll:
@@ -85,18 +85,6 @@ hook_probe:
 1:  stwu    1, -0x10(1)         # original instruction
     b       PROBE_RET
 
-# KPADiRead on its way out: r26 = status array, r29 = how many were read, r25 = channel
-hook_post:
-    SAVE
-    mr      3, 26
-    mr      4, 29
-    mr      5, 25
-    bl      gc_post
-    RESTORE_ALL
-    lwz     0, 0x0c(1)
-    addi    1, 1, 0x70
-    cmpwi   29, 0               # original instruction
-    b       POST_RET
 
     .section .gcstate, "aw", @progbits
     .globl gc_state

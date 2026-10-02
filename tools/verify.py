@@ -32,14 +32,15 @@ for rev, patch in json.load(open(os.path.join(HERE, '..', 'patches.json'))).item
         secs = sorted((a, a + s) for a, s in zip(d.addr, d.size) if s)
         if any(secs[i][1] > secs[i + 1][0] for i in range(len(secs) - 1)):
             errs.append('overlapping sections')
-        base, size = patch['base'], len(bytes.fromhex(patch['blob']))
+        base = patch['base']
+        size = max(a + s - base for a, s in zip(d.addr, d.size) if a == base)
         if base + size > patch_dol.LIMIT:
-            errs.append('blob passes 0x%08X' % patch_dol.LIMIT)
-        for s in patch['sites']:
+            errs.append('code passes 0x%08X' % patch_dol.LIMIT)
+        for s in patch['sites'] + patch['extras']:
             w = d.word(s['site'])
             tgt = s['site'] + (((w & 0x03FFFFFC) ^ 0x02000000) - 0x02000000)
-            if w >> 26 != 18 or tgt != s['hook'] or not base <= tgt < base + size:
-                errs.append('site %08X does not branch to its hook' % s['site'])
+            if w >> 26 != 18 or not base <= tgt < base + size:
+                errs.append('site %08X does not branch into the new section' % s['site'])
     print('%s  %s' % (rev, 'ok' if not errs else 'FAIL: ' + '; '.join(errs)))
     ok &= not errs
 sys.exit(0 if ok else 1)
