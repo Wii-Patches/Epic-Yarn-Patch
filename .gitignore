@@ -1,0 +1,12 @@
+dolphin_user/
+dols/
+*.dol
+*.iso
+*.wbfs
+__pycache__/
+build/
+dist/
+*.bak
+shots/
+tools/.srv.sock
+srv.log
