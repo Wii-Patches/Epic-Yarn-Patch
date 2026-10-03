@@ -21,6 +21,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import patch_dol
+from disc_ids import match_disc_id
 
 WII_MAGIC = 0x5D1C9EA3
 REGIONS = {
@@ -93,10 +94,11 @@ def identify(image):
     if not got:
         raise RuntimeError('%s is not a Wii disc image (.wbfs or .iso)' % os.path.basename(image))
     disc_id, version = got
-    if disc_id not in REGIONS:
+    region = match_disc_id(disc_id, REGIONS)
+    if region is None:
         raise RuntimeError('%s is not Kirby\'s Epic Yarn (disc id %s).\n\nSupported: %s'
                            % (os.path.basename(image), disc_id, ', '.join(sorted(REGIONS))))
-    return disc_id
+    return region
 
 
 def patch_key(disc_id, layout='ba'):
