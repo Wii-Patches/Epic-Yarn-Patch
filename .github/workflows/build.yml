@@ -83,7 +83,7 @@ jobs:
           WIT="$PWD/wit_bin/wit" TARGET_ARCH=universal2 pyinstaller --noconfirm Kirby-Patcher.spec
           cp wit-gpl-2.0.txt dist/Kirby-Patcher.app/Contents/Resources/
           cd dist
-          zip -qr "../Epic-Yarn-Patch-${{ matrix.target }}.zip" Kirby-Patcher.app
+          zip -qr "../Epic-Yarn-ISO-Patcher-${{ matrix.target }}.zip" Kirby-Patcher.app
 
       - name: Build app (Linux)
         if: matrix.target == 'linux-x86_64'
@@ -91,7 +91,7 @@ jobs:
           WIT="$PWD/wit_bin/wit" pyinstaller --noconfirm Kirby-Patcher.spec
           cp wit-gpl-2.0.txt dist/Kirby-Patcher/
           cd dist
-          tar -czf "../Epic-Yarn-Patch-${{ matrix.target }}.tar.gz" Kirby-Patcher
+          tar -czf "../Epic-Yarn-ISO-Patcher-${{ matrix.target }}.tar.gz" Kirby-Patcher
 
       - name: Build app (Windows)
         if: matrix.target == 'windows-x86_64'
@@ -100,15 +100,15 @@ jobs:
           WIT="$PWD/wit_bin/wit.exe" pyinstaller --noconfirm Kirby-Patcher.spec
           cp wit-gpl-2.0.txt dist/Kirby-Patcher/
           cd dist
-          7z a "../Epic-Yarn-Patch-${{ matrix.target }}.zip" Kirby-Patcher
+          7z a "../Epic-Yarn-ISO-Patcher-${{ matrix.target }}.zip" Kirby-Patcher
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Epic-Yarn-Patch-${{ matrix.target }}
-          path: Epic-Yarn-Patch-${{ matrix.target }}.*
+          name: Epic-Yarn-ISO-Patcher-${{ matrix.target }}
+          path: Epic-Yarn-ISO-Patcher-${{ matrix.target }}.*
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Epic-Yarn-Patch-${{ matrix.target }}.*
+          files: Epic-Yarn-ISO-Patcher-${{ matrix.target }}.*
